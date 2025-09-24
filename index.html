@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>What-If Decision Simulator</title>
+<style>
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  background: #f5f5f5;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+header {
+  text-align: center;
+  background: #4CAF50;
+  color: white;
+  padding: 20px 10px;
+}
+
+header h1 { margin: 0; font-size: 24px; }
+
+header .header-buttons {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.header-buttons a button {
+  padding: 6px 12px;
+  font-size: 14px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  background: #2196F3;
+  color: white;
+}
+
+.main-container {
+  display: flex;
+  flex: 1;
+  flex-direction: row;
+  gap: 20px;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.left-panel, .right-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+input {
+  padding: 12px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+button.action-btn {
+  padding: 12px;
+  font-size: 16px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+#generateBtn { background-color: #4CAF50; color: white; }
+#generateBtn:hover { background-color: #45a049; }
+
+#resetBtn { background-color: #f44336; color: white; }
+#resetBtn:hover { background-color: #e53935; }
+
+.outcome {
+  margin: 6px 0;
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.percent { font-size: 14px; margin-left: 5px; }
+
+.history {
+  background: #fff;
+  padding: 10px;
+  border-radius: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+}
+
+.history h3 { margin-top: 0; }
+
+@media (max-width: 800px) {
+  .main-container { flex-direction: column; }
+  header h1 { font-size: 20px; }
+  input, button.action-btn { font-size: 14px; padding: 10px; }
+  .outcome { font-size: 14px; padding: 10px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>What-If Decision Simulator</h1>
+  <div class="header-buttons">
+    <a href="credits.html"><button>Credits</button></a>
+  </div>
+</header>
+
+<div class="main-container">
+  <div class="left-panel">
+    <div class="input-container">
+      <input type="text" id="decisionInput" placeholder="Type your decision here" />
+      <button class="action-btn" id="generateBtn">Generate Outcomes</button>
+      <button class="action-btn" id="resetBtn">Clear / Reset</button>
+    </div>
+    <div id="outcomesContainer"></div>
+  </div>
+
+  <div class="right-panel">
+    <div class="history">
+      <h3>Chosen Path:</h3>
+      <ul id="historyList"></ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const OPENROUTER_API_KEY = "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";
+
+// Conversation memory
+let conversation = [
+  { role: "system", content: `
+You are a decision simulator AI. Every user input generates multiple plausible 'What if...' outcomes.
+Remember all previous inputs and outcomes, and generate context-aware future outcomes.
+Each outcome should start with 'What if...' and be a question.
+Always generate 8–10 outcomes for each decision.
+` }
+];
+
+const decisionInput = document.getElementById("decisionInput");
+const generateBtn = document.getElementById("generateBtn");
+const resetBtn = document.getElementById("resetBtn");
+const outcomesContainer = document.getElementById("outcomesContainer");
+const historyList = document.getElementById("historyList");
+
+async function fetchFromOpenRouter(messages) {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "x-ai/grok-4-fast:free", messages })
+    });
+    const data = await res.json();
+    console.log("API response:", data);
+    return data?.choices?.[0]?.message?.content?.trim() || null;
+  } catch (err) {
+    console.error("OpenRouter text error:", err);
+    return null;
+  }
+}
+
+function splitOutcomes(text) {
+  let outcomes = text.split(/\d+\.\s+/).map(o => o.trim()).filter(o => o);
+  if (outcomes.length <= 1) outcomes = text.split(/(?=What if)/gi).map(o => o.trim()).filter(o => o);
+  return outcomes;
+}
+
+async function generateOutcomes(decision) {
+  outcomesContainer.innerHTML = "Loading...";
+  conversation.push({ role: "user", content: decision });
+
+  const text = await fetchFromOpenRouter(conversation);
+  if (!text) {
+    outcomesContainer.innerHTML = "Failed to generate outcomes. Check console for API response.";
+    return;
+  }
+
+  conversation.push({ role: "assistant", content: text });
+
+  const outcomes = splitOutcomes(text);
+  const outcomesWithPercent = outcomes.map(o => ({
+    text: o,
+    percent: Math.floor(Math.random() * 51) + 25
+  }));
+
+  renderOutcomes(outcomesWithPercent);
+}
+
+function renderOutcomes(outcomes) {
+  outcomesContainer.innerHTML = "";
+  outcomes.forEach(outcome => {
+    const div = document.createElement("div");
+    div.className = "outcome";
+
+    let color = "red";
+    if (outcome.percent > 60) color = "green";
+    else if (outcome.percent > 40) color = "orange";
+
+    div.innerHTML = `<span>${outcome.text} <span class="percent" style="color:${color}">(${outcome.percent}%)</span></span>`;
+    outcomesContainer.appendChild(div);
+
+    div.onclick = async () => {
+      const li = document.createElement("li");
+      li.textContent = outcome.text;
+      historyList.appendChild(li);
+      await generateOutcomes(outcome.text);
+    };
+  });
+}
+
+generateBtn.onclick = () => {
+  const decision = decisionInput.value.trim();
+  if (!decision) return alert("Please type a decision first.");
+  historyList.innerHTML = "";
+  conversation = [
+    { role: "system", content: `
+You are a decision simulator AI. Every user input generates multiple plausible 'What if...' outcomes.
+Remember all previous inputs and outcomes, and generate context-aware future outcomes.
+Each outcome should start with 'What if...' and be a question.
+Always generate 8–10 outcomes for each decision.
+` }
+  ];
+  generateOutcomes(decision);
+};
+
+resetBtn.onclick = () => {
+  decisionInput.value = "";
+  outcomesContainer.innerHTML = "";
+  historyList.innerHTML = "";
+  conversation = [
+    { role: "system", content: `
+You are a decision simulator AI. Every user input generates multiple plausible 'What if...' outcomes.
+Remember all previous inputs and outcomes, and generate context-aware future outcomes.
+Each outcome should start with 'What if...' and be a question.
+Always generate 8–10 outcomes for each decision.
+` }
+  ];
+};
+</script>
+
+</body>
+</html>
